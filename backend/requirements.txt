@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+requests
+pymupdf
+python-multipart
+python-pptx
+pdfminer.six
+pillow
+alembic
+part
+pypdf
+python-pptx
+# freeze
