@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 chcp 65001 > nul
 TITLE AI Study Agent - One Click Launcher
 
@@ -9,7 +9,7 @@ echo ======================================================
 :: 检查运行环境 (Docker + Ollama)
 echo [1/3] 请确保以下环境已就绪：
 echo       - Docker 中的 pgvector 数据库已启动 (端口: 5433)
-echo       - Ollama 已运行并拉取了所需模型 (deepseek-r1:7b, nomic-embed-text)
+echo       - Ollama 已运行并拉取了所需模型 (deepseek-r1:7b, nomic-embed-text)   
 echo.
 
 :: 检查并清理被占用的 8000 端口
@@ -20,15 +20,18 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr "0.0:8000 127.0.0.1:8000"') d
 
 :: 启动后端
 echo [2/3] 正在后台启动后端服务 (FastAPI)...
-start "AI-Backend" cmd /k "chcp 65001 > nul && cd /d %~dp0backend && ..\.venv\Scripts\activate && uvicorn app:app --host 127.0.0.1 --port 8000 --reload"
+start "AI-Backend" cmd /k "chcp 65001 > nul && cd /d %~dp0backend && ..\.venv\Scripts\activate && uvicorn app:app --host 127.0.0.1 --port 8000 --reload"        
+
+:: 启动 RQ Worker (Celery 替代方案) 处理排队的任务
+echo [3/4] 正在后台启动 RQ Worker 任务处理进程...
+start "AI-Worker" cmd /k "chcp 65001 > nul && cd /d %%~dp0backend && ..\.venv\Scripts\activate && python run_worker.py"
 
 :: 等待几秒
 timeout /t 3 /nobreak > nul
 
 :: 启动前端
-echo [3/3] 正在启动前端服务 (Vite)...
-start "AI-Frontend" cmd /k "chcp 65001 > nul && cd /d %~dp0frontend && npm run dev"
-
+echo [4/4] 正在启动前端服务 (Vite)...
+start "AI-Frontend" cmd /k "chcp 65001 > nul && cd /d %~dp0frontend && npm run dev"                                                                             
 echo.
 echo ======================================================
 echo  服务启动中！
