@@ -119,7 +119,7 @@ class OllamaService(BaseLLMService):
         {{"name": "概念名称", "content": "详细的一句话解释", "importance": 3}}
     ],
     "examples": [
-        {{"question": "推断的一道例题题干", "solution": "简单解析（若无则不写）"}}
+        {{"question": "必须100%来自原文的例题题干（如果没有这页则返回空）", "solution": "严格使用原文解答"}}
     ]
 }}
 """
@@ -277,7 +277,7 @@ class OllamaService(BaseLLMService):
         # Build contexts (V2.0)
         config_context = ""
         if user_config:
-            config_context = self._build_config_context(user_config)
+            config_context = ''
             logger.info(f"[V2.0] Injecting user config: {config_context[:100]}...")
         
         domain_context = ""
@@ -566,7 +566,7 @@ class CloudAPIService(OllamaService):
 
     def generate_roadmap(self, text: str, user_config: dict = None, domain_analysis: dict = None) -> list:
         # Re-use the prompt part from the parent
-        config_context = self._build_config_context(user_config) if user_config else ""
+        config_context = '' if user_config else ""
         domain_context = self._build_domain_context(domain_analysis) if domain_analysis else ""
         
         system_prompt = (
