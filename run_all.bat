@@ -24,7 +24,7 @@ start "AI-Backend" cmd /k "chcp 65001 > nul && cd /d %~dp0backend && ..\.venv\Sc
 
 :: 启动 RQ Worker (Celery 替代方案) 处理排队的任务
 echo [3/4] 正在后台启动 RQ Worker 任务处理进程...
-start "AI-Worker" cmd /k "chcp 65001 > nul && cd /d %%~dp0backend && ..\.venv\Scripts\activate && python run_worker.py"
+start "AI-Worker" cmd /k "chcp 65001 > nul && cd /d %~dp0backend && ..\.venv\Scripts\activate && python run_worker.py"
 
 :: 等待几秒
 timeout /t 3 /nobreak > nul

@@ -1,67 +1,9 @@
-import json
-from typing import List
-import logging
+﻿import re
 
-logger = logging.getLogger(__name__)
+with open('backend/services/upload_service.py', 'r', encoding='utf-8') as f:
+    content = f.read()
 
-def merge_roadmap_chunks(chunked_roadmap: List[dict]) -> List[dict]:
-    """Smart Merge: Combine fragmented chapters by title."""
-    merged_dict = {}
-    chapter_order = [] # Keep track of order
-
-    for chapter in chunked_roadmap:
-        if not isinstance(chapter, dict):
-            logger.warning(f"[SmartMerge] Skipping non-dict chapter: {chapter}")
-            continue
-
-        raw_title = chapter.get('title', '未命名章节')
-        if not isinstance(raw_title, str):
-            raw_title = str(raw_title)
-        raw_title = raw_title.strip()
-        
-        if raw_title not in merged_dict:
-            # Create new entry
-            new_id = f"chap_{len(chapter_order) + 1}"
-            merged_dict[raw_title] = {
-                "id": new_id,
-                "title": raw_title,
-                "summary": str(chapter.get('summary', '')),
-                "points": [],
-                "examples": []
-            }
-            chapter_order.append(raw_title)
-        
-        target = merged_dict[raw_title]
-        
-        # Merge Points (Re-indexing IDs)
-        current_points_count = len(target['points'])
-        for idx, point in enumerate(chapter.get('points', [])):
-            if isinstance(point, str):
-                point = {"name": "核心概念", "content": point, "importance": 5, "type": "concept"}
-            
-            if not isinstance(point, dict):
-                logger.warning(f"[SmartMerge] Skipping invalid point format: {point}")
-                continue
-
-            try:
-                point['id'] = f"{target['id']}_p{current_points_count + len(target['points']) + 1}"
-                target['points'].append(point)
-            except Exception as e:
-                logger.error(f"[SmartMerge] Error re-indexing point: {e}")
-            
-        # Merge Examples
-        examples = chapter.get('examples', [])
-        if isinstance(examples, list):
-            target['examples'].extend(examples)
-        
-        # Merge Summary
-        new_summary = chapter.get('summary', '')
-        if isinstance(new_summary, str) and len(new_summary) > len(target['summary']):
-            target['summary'] = new_summary
-
-    return [merged_dict[title] for title in chapter_order]
-
-def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: str):
+new_process_upload = '''def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: str):
     """
     后台任务: 调度 Agent 进行知识抽取与出题。
     """
@@ -78,7 +20,6 @@ def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: st
         if not space:
             return "Space not found"
 
-        import json
         user_config = json.loads(space.config_data or "{}")
 
         texts = parse_file(file_path, ftype, user_config=user_config)
@@ -101,7 +42,7 @@ def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: st
             )
             db.add(block)
             blocks.append(block)
-            full_text_for_summary += text + "\n"
+            full_text_for_summary += text + "\\n"
 
         db.commit()
 
@@ -115,9 +56,10 @@ def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: st
                 agent.register_tool(t)
 
             task_instruction = (
-                "你的任务是处理用户上传的新文档材料。请按顺序执行以下两个操作：\n"
-                "1. 调用 DocumentParser 工具，提取文档的知识点结构。\n"
-                "2. 拿到 DocumentParser 返回的大纲JSON文本后，将其作为 `roadmap_json` 参数，调用 ExamGenerator 工具生成考题。\n"
+                "你的任务是处理用户上传的新文档材料。请按顺序执行以下两个操作：\\n"
+                "1. 调用 DocumentParser 工具，提取文档的知识点结构。\\n"
+                "2. 拿到 DocumentParser 返回的大纲JSON文本后，将其作为 
+oadmap_json 参数，调用 ExamGenerator 工具生成考题。\\n"
                 "请将生成的考题JSON数组和知识点大纲整理好汇报给我。"
             )
             
@@ -147,14 +89,15 @@ def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: st
             
             # Save the generated quiz to the DB (We will append it to summary for now since ExamRecord model is missing)
             if quiz:
+                import json
                 quiz_str = json.dumps(quiz, ensure_ascii=False, indent=2)
                 logger.info(f"Generated {len(quiz)} exam questions for new document. Appending to summary.")
-                main_thread.current_summary = (main_thread.current_summary or "") + "\n\n== 出题工具生成的课后自测题 ==\n" + quiz_str
+                main_thread.current_summary = (main_thread.current_summary or "") + "\\n\\n== 出题工具生成的课后自测题 ==\\n" + quiz_str
 
             # Summary
             file_summary = llm.generate_summary(full_text_for_summary[:8000])
             current_summary = main_thread.current_summary or ""
-            main_thread.current_summary = f"{current_summary}\n\n== 新增资料 ==\n{file_summary}"
+            main_thread.current_summary = f"{current_summary}\\n\\n== 新增资料 ==\\n{file_summary}"
 
             db.commit()
 
@@ -174,4 +117,12 @@ def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: st
         raise e
     finally:
         db.close()
+'''
 
+old_func_pattern = re.compile(r'def process_upload_task\(.*?\n    finally:\n        db.close\(\)', re.DOTALL)
+content = old_func_pattern.sub(new_process_upload, content)
+
+with open('backend/services/upload_service.py', 'w', encoding='utf-8') as f:
+    f.write(content)
+
+print("Patch successful!")

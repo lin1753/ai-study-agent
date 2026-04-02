@@ -20,6 +20,10 @@ class BaseLLMService(ABC):
         pass
 
     @abstractmethod
+    def generate_raw(self, prompt: str, temperature: float = 0.3) -> str:
+        pass
+
+    @abstractmethod
     def generate_summary(self, text: str) -> str:
         pass
 
@@ -29,6 +33,10 @@ class BaseLLMService(ABC):
 
     @abstractmethod
     def analyze_page(self, page_text: str, previous_chapter: str, user_config: dict = None) -> dict:
+        pass
+
+    @abstractmethod
+    def generate_exam_quiz(self, roadmap_json: str, user_config: dict) -> list:
         pass
 
 class OllamaService(BaseLLMService):
@@ -58,6 +66,22 @@ class OllamaService(BaseLLMService):
         except requests.exceptions.RequestException as e:
             logger.error(f"Error communicating with Ollama: {str(e)}")
             yield f"Error communicating with Ollama: {str(e)}"
+
+    def generate_raw(self, prompt: str, temperature: float = 0.3) -> str:
+        url = f"{self.base_url}/api/generate"
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": temperature}
+        }
+        try:
+            response = requests.post(url, json=payload, timeout=120)
+            response.raise_for_status()
+            return response.json().get("response", "")
+        except Exception as e:
+            logger.error(f"Error in generate_raw: {e}")
+            return f"Error: {str(e)}"
 
     def generate_summary(self, text: str) -> str:
         url = f"{self.base_url}/api/generate"
@@ -174,6 +198,42 @@ class OllamaService(BaseLLMService):
         except Exception as e:
             logger.error(f"OCR failed: {e}")
             return ""
+
+    def generate_exam_quiz(self, roadmap_json: str, user_config: dict) -> list:
+        url = f"{self.base_url}/api/generate"
+        weight_context = self._build_config_context(user_config) if user_config else "默认出题均衡"
+        
+        prompt = f"""你是一个资深的考卷出题专家。请根据以下大纲知识点和用户指定的【考试题型权重】，出一套高还原度的课后测验题。
+        
+【用户考试题型偏好】:
+{weight_context}
+
+【知识点大纲】:
+{roadmap_json}
+
+请严格输出合法的 JSON 数组结构，每个元素是一道独立的题目，格式如下：
+[
+    {{ "type": "choice|blank|short|calc", "question": "题目内容", "options": ["选项A", "选项B"], "answer": "答案/解析" }}
+]
+注意：如果不是选择题，options字段填空数组[]。绝对禁止随附任何markdown标志或者多余文本。
+"""
+        payload = { "model": self.model, "prompt": prompt, "stream": False, "format": "json" }
+        logger.debug("Generating independent exam quiz based on parsed knowledge...")
+        try:
+            import requests, json
+            response = requests.post(url, json=payload, timeout=120)
+            if response.status_code == 200:
+                res_text = response.json().get("response", "")
+                try:
+                    return json.loads(res_text)
+                except:
+                    import re
+                    match = re.search(r'\[.*\]', res_text, re.DOTALL)
+                    if match:
+                        return json.loads(match.group(0))
+        except Exception as e:
+            logger.error(f"[Ollama] Failed to generate exam quiz: {e}")
+        return []
 
     def analyze_subject_domain(self, text: str) -> dict:
         """
@@ -523,6 +583,22 @@ class CloudAPIService(OllamaService):
             logger.error(f"Cloud API Stream Error: {e}")
             yield f"Error communicating with Cloud API: {str(e)}"
 
+    def generate_raw(self, prompt: str, temperature: float = 0.3) -> str:
+        url = f"{self.base_url}/chat/completions"
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "temperature": temperature
+        }
+        try:
+            response = requests.post(url, json=payload, headers=self.headers, timeout=180)
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            logger.error(f"Error in generate_raw (Cloud API): {e}")
+            return f"Error: {str(e)}"
+
     def _generate_cloud(self, system_prompt: str, user_prompt: str) -> str:
         url = f"{self.base_url}/chat/completions"
         payload = {
@@ -539,6 +615,42 @@ class CloudAPIService(OllamaService):
 
     def generate_summary(self, text: str) -> str:
         return self._generate_cloud("你是一个专业的助手。请总结以下内容的知识点，提取核心概念，保持简洁。", text)
+
+    def generate_exam_quiz(self, roadmap_json: str, user_config: dict) -> list:
+        url = f"{self.base_url}/api/generate"
+        weight_context = self._build_config_context(user_config) if user_config else "默认出题均衡"
+        
+        prompt = f"""你是一个资深的考卷出题专家。请根据以下大纲知识点和用户指定的【考试题型权重】，出一套高还原度的课后测验题。
+        
+【用户考试题型偏好】:
+{weight_context}
+
+【知识点大纲】:
+{roadmap_json}
+
+请严格输出合法的 JSON 数组结构，每个元素是一道独立的题目，格式如下：
+[
+    {{ "type": "choice|blank|short|calc", "question": "题目内容", "options": ["选项A", "选项B"], "answer": "答案/解析" }}
+]
+注意：如果不是选择题，options字段填空数组[]。绝对禁止随附任何markdown标志或者多余文本。
+"""
+        payload = { "model": self.model, "prompt": prompt, "stream": False, "format": "json" }
+        logger.debug("Generating independent exam quiz based on parsed knowledge...")
+        try:
+            import requests, json
+            response = requests.post(url, json=payload, timeout=120)
+            if response.status_code == 200:
+                res_text = response.json().get("response", "")
+                try:
+                    return json.loads(res_text)
+                except:
+                    import re
+                    match = re.search(r'\[.*\]', res_text, re.DOTALL)
+                    if match:
+                        return json.loads(match.group(0))
+        except Exception as e:
+            logger.error(f"[Ollama] Failed to generate exam quiz: {e}")
+        return []
 
     def analyze_subject_domain(self, text: str) -> dict:
         sample_text = text[:5000]

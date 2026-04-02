@@ -27,14 +27,20 @@
 
 ## 3. 分阶段实施路线 (Roadmap)
 
-### Phase 1: 底层基础设施改造 (1-2周)
-- **目标**: 实现轻量级的 Agent 循环执行引擎，彻底解耦 RAG 功能和出题功能。
-- **任务**:
-  1. 引入/手写轻量级 Agent 框架（考虑到本地 7B 模型能力，不建议上过于重量级的 LangChain 原生 Agent，建议手写带严格格式约束的 ReAct Loop 或者结合 `LangGraph` 状态机）。
-  2. 将原有的 `parse_document` 功能封装为一个独立的 `DocumentParserTool`。
-  3. 将“生成主干”与“分配考试权重出题”逻辑物理拆分入不同的 Prompt 节点中。
+### ✅ Phase 1: 底层基础设施改造与性能调优 (已完成)
+- **成就**:
+  1. 引入并手写了基于 Python 函数映射的轻量级 Agent Controller 工具链。
+  2. 完成了 `DocumentParserTool` 与 `ExamGenerator` 的解耦，通过 Map-Reduce 大纲归并算法，根除超长 PDF 生成卡死与 Token 溢出问题。
+  3. 将重型处理任务剥离至 Redis + RQ Background Worker 中，主线程解耦，支持超大并发上传。
 
-### Phase 2: 导师人设与记忆系统介入 (1周)
+### 🔄 Phase 1.5: 项目重构与模块优化 (当前阶段)
+- **目标**: 解决 `backend` 目录下过于臃肿（意大利面条代码）、缺乏统一规范的问题，优化项目结构。
+- **任务**:
+  1. 标准化分层架构（将其划分为 `api`, `core`, `services`, `models`, `workers` 五个核心组件域）。
+  2. 提取散落的配置与环境变量（Database URL, API Keys）。
+  3. 梳理清理废弃与冗余脚本。
+
+### Phase 2: 导师人设与记忆系统介入 (规划中)
 - **目标**: 消除 AI 刻板语气，建立用户学习画像。
 - **任务**:
   1. 在 `backend/teaching_styles.py` 中扩充并重构 `System Prompt`。

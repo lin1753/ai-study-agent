@@ -74,8 +74,13 @@ Final Answer: 最终的结果或总结。
                 action_name = action_part.split("Action Input:", 1)[0].strip()
                 
                 action_input_part = response.split("Action Input:", 1)[1].strip()
-                # Extremely naive JSON extraction:
-                input_json_str = action_input_part.split("\n")[0].strip()
+                # Enhanced JSON extraction:
+                import re
+                json_match = re.search(r"(\{.*\})", action_input_part, re.DOTALL)
+                if json_match:
+                    input_json_str = json_match.group(1).strip()
+                else:
+                    input_json_str = action_input_part.split("\n")[0].strip()
                 
                 try:
                     kwargs = json.loads(input_json_str)
@@ -102,21 +107,10 @@ Final Answer: 最终的结果或总结。
         return "Max steps reached without concluding."
 
     def _call_llm_raw(self, prompt: str) -> str:
-        # Depending on base llm implementation, we could just send the prompt directly to ollama
-        # For simplicity, we bypass structured prompt in favor of raw prompt to ollama API
-        import requests
-        url = f"{self.llm.base_url}/api/generate"
-        payload = {
-            "model": self.llm.model_name,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.3}
-        }
         try:
-            resp = requests.post(url, json=payload, timeout=60)
-            if resp.status_code == 200:
-                result_json = resp.json()
-                return result_json.get("response", "")
+            result = self.llm.generate_raw(prompt, temperature=0.3)
+            if result.startswith("Error:"):
+                return f"Final Answer: {result}"
+            return result
         except Exception as e:
             return f"Final Answer: LLM completion failed: {e}"
-        return "Final Answer: Error."
