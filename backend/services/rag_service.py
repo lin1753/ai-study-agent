@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
-from models import KnowledgeBlock
-from llm_service import get_llm_service
+from models.database import KnowledgeBlock
+from core.llm_factory import get_llm_service
 
 def search_related_blocks(db: Session, space_id: str, query: str, top_k: int = 5, user_config: dict = None) -> list[KnowledgeBlock]:
     """

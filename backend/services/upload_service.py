@@ -65,11 +65,11 @@ def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: st
     """
     后台任务: 调度 Agent 进行知识抽取与出题。
     """
-    from db import SessionLocal
-    from models import ConversationSpace, FileRecord, KnowledgeBlock, MainThread
-    from parsing import parse_file
-    from llm_service import get_llm_service
-    from agent_controller import StudyAgent
+    from core.db import SessionLocal
+    from models.database import ConversationSpace, FileRecord, KnowledgeBlock, MainThread
+    from utils.parsing import parse_file
+    from core.llm_factory import get_llm_service
+    from services.agent_controller import StudyAgent
     import uuid
 
     db = SessionLocal()
