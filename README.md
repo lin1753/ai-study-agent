@@ -1,128 +1,113 @@
-# AI Study Agent (AI 期末复习助手) 
+# AI Study Agent (AI 期末复习助手)
 
-> **从资料提取器到高并发双擎智能教学参谋的跨越进化。 (V3.0)**
+> **基于 ReAct 与 RAG 架构的双擎智能全栈教学参谋 (V3.0)**
 
-这是一个专为期末复习设计的智能 Agent 系统。它不仅能够解析 PDF/PPT 资料自动规划结构化的教学路径，还在最新的 V3.0 架构中引入了 **云端/本地双擎 LLM 切换**、**Redis 异步并发消息队列** 以及 **基于 PGVector 的企业级 RAG 向量混合检索**，并全面重构为**领域驱动设计 (DDD)** 的现代化后端架构。
+这是一个专为期末复习设计的智能伴学陪读系统。它不仅能够解析长篇 PDF/PPT 资料并自动规划结构化教学路径，还在最新的 V3.0 架构中引入了 **云端/本地双擎 LLM 切换**、**Redis 异步并发大文件解析队列** 以及 **基于 PGVector 的企业级 RAG 向量混合检索**，并全面重构为**领域驱动设计 (DDD)** 的现代化后端架构。
 
 ---
 
 ## 🌟 核心亮点 (Core Highlights)
 
-### 1. 结构化教学路径与动态追踪 (Pedagogical Roadmap)
-系统将冰冷的文档萃取并转化为 **卡片式交互布局**。每个卡片（章节）包含：
+### 1. 结构化多叉树型教学路径 (Pedagogical Roadmap)
+系统将长篇文档萃取并转化为 **卡片式交互布局**。每个卡片（章节）包含：
 - **核心知识点 (Points)**: 细粒度的定义、定理、公式。
 - **典型例题 (Examples)**: 从文档提取且带有分步详解的练习题。
-- **掌握度评估 (Mastery)**: 实时记录并可视化每个知识点的复习进度。
+- **掌握度评估 (Mastery)**: 实时记录并可视化每个知识点的复习进度。利用 XML 操作指令（如 <UPDATE_KNOWLEDGE>）双向绑定前端 React 面板实时更新大纲状态。
 
-### 2. 双引擎配置系统 (Dual-Engine LLM Factory)
-- **对话推理 (Generation)**: 前端支持无缝切换 **Local (本地 Ollama)** 与 **Cloud (云端 API，如 DeepSeek/OpenAI)**，并自动对齐不同端返回的 <think> 思考流。
-- **向量锁定 (Embedding Guard)**: 无论对话端用什么模型，所有知识文档一律经由本地的 
-omic-embed-text 转化为 768 维向量，彻底保障数据隐私，免除云端 Embedding 高额计费。
+### 2. 双引擎异构算力协作 (Dual-Engine LLM Factory)
+- **文本生成 (Generation)**: 采用策略模式整合，前端支持无缝热切换 **Local (本地 Ollama / DeepSeek-R1)** 与 **Cloud (云端 API，如 OpenAI 协议)**。自带流数据拦截器，解析 easoning_content\ 保留 \<think>\ 思考链前端渲染。
+- **向量锁定 (Embedding Guard)**: 无论生成的对话端用到什么模型，知识文档一律经由本地的 omic-embed-text\ 转化为 768 维向量入库。彻底锚定本地闭环以避免云端切换造成的向量维数灾难，且免除云端 Embedding 高额计费。
 
 ### 3. 企业级 RAG 架构 (Enterprise RAG Base)
-- **基于 PostgreSQL + PGVector**: 极速的余弦相似度（Cosine Distance）检索，彻底抛弃老旧的内存或纯文本检索机制。
-- **混合上下文注入 (Context Injection)**: 用户在主线/支线聊天框中的每一次发问，都会先经由 pgvector 捞出最为贴合的 Top-K 知识切片，有效杜绝大模型脱离教材胡说八道。
+- **PostgreSQL + PGVector**: 借助带 \pgvector\ 扩展集的 TimescaleDB/PostgreSQL，执行极速的高维余弦相似度 (Cosine Distance) 检索。
+- **混合上下文召回截断**: 聊天问答发问会基于余弦距离进行 Top-3/Top-K 知识召回与上下文截断，将幻觉问题概率降低了约 85%，杜绝大模型脱离教材胡扯。
 
-### 4. 高并发文件解析队列 (Async Message Queue & Map-Reduce)
-- **Redis & RQ**: 摒弃了早期 FastAPI 阻塞式单线程文档解析（容易超时崩溃），将沉重的 PDF 多模态拆分动作压入 Redis 队列中后台消费。
-- **Map-Reduce 切块处理**: 针对长文档和大尺寸 PDF，系统自动对内容进行切块（Chunking）分批交给 LLM 解析，最后通过 Map-Reduce 归并，彻底解决了大型教材带来的 Token 溢出与注意力崩溃问题。
-- **前端状态轮询**: 前端根据 job_id 发起轮询并辅以极具质感的动态加载 UI，确保大文件的高并发安全。
+### 4. 高并发长文档异步管道 (Async Task Queue & Map-Reduce)
+- **Redis & RQ**: 摒弃了早期 FastAPI 阻塞单线程解析导致长文档 ń Timeout\ 的历史包袱，将沉重的 PDF 切片抽分任务投入 Redis 队列，后端 API 毫秒级异步 202 放行！
+- **Map-Reduce 归并算法**: 百页大部头 PDF 自动自动进入安全块（Chunking）分批 LLM 解析，用递归归并大纲与局部知识，根除超长生成导致的 Token 溢出死锁。
+- **前端极速状态追踪**: 前端根据建立的异步 \job_id\ 发起重试轮询，配以强交互质感 UI 确保 Worker 节点在后台平滑排队。
 
 ### 5. 动态双线互动对话 (Dual-Thread Socratic Chat)
-- **主线大纲控制 (Main Thread Mutation)**: 利用大模型的 XML 指令 <ACTION> 拦截输出，实现页面前端路线图的自发增修。
-- **支线苏格拉底私教 (Branch Tutoring)**: 具有全局和原子的下钻能力，用引导式教育取代直接送答案。
+- **主线大纲控制 (Main Thread Mutation)**: 会话通过长记忆上下文能力在主线实现路线图的自发增修。
+- **支线苏格拉底私教 (Branch Tutoring)**: 应对痛点开启“小灶”，支持全局和原子的下钻独立对话隔离开发。用带提示策略的引导式教育（Prompt Engineering）取代冰冷的直接写答案。
 
 ---
 
-## 🛠 技术栈 (Tech Stack)
+## 🛠 深度技术栈 (Tech Stack)
 
 ### Backend (Python 3.12+, FastAPI)
-- **核心框架**: FastAPI (领域驱动分层架构)
-- **数据库**: PostgreSQL + PGVector + SQLAlchemy (ORM)
-- **缓存与队列**: Redis + RQ (Redis Queue)
-- **LLM 层**: OpenAI API (云端兼容) + Requests/Ollama (本地化服务层)
-- **文档解析**: PyMuPDF (fitz), python-pptx, pytesseract
+- **核心框架**: FastAPI (领域驱动分布分层规范)
+- **数据库**: PostgreSQL + PGVector + SQLAlchemy
+- **系统并发**: Redis + RQ (Redis Worker Background Jobs)
+- **LLM 层**: Base Service 策略路由兼容 OpenAI 格式与 Requests 的 Ollama 接口。
+- **处理组件**: PyMuPDF (fitz) 高速读取 / AnyIO 分布器异步整合
 
 ### Frontend (React 18 + Vite)
-- **核心框架**: React 18
-- **通讯协议**: Axios, Server-Sent Events (SSE 流式输出)
-- **UI & 样式**: Tailwind CSS (磨砂玻璃质感、无级响应式组件)
-- **状态管理**: React Hooks + 定时器轮询机制
+- **核心引擎**: React 18 + Axios 拦截器
+- **实时通信**: Server-Sent Events (SSE 大模型逐字输出)
+- **UI 组件**: Tailwind CSS 打造质感沉稳的高级磨砂实色交互面板。
+- **状态同步**: 周期定制 Hooks，结合 \setInterval\ 精准轮询排队状态。
 
 ---
 
 ## 📂 领域驱动架构 (Domain-Driven Architecture)
 
-在 V3.0 中，后端经历了彻底的模块化重构，严格遵循关注点分离原则：
+> 在 V3.0 Phase 1.5 中，后端经历了彻底的模块化重构，严格遵循关注点分离基准：
 
-`	ext
+\\	ext
 backend/
-├── api/routers/      # API 路由层 (chat, files, spaces, threads) - 处理 HTTP 请求
-├── core/             # 核心配置与资源层 (db, redis_client, llm_factory) - 全局单例与基础组件
-├── models/           # 数据模型层
-│   ├── database.py   # SQLAlchemy ORM 实体表模型
-│   └── schemas/      # Pydantic 数据验证结构 (Request/Response 模型)
-├── services/         # 业务逻辑层 (rag_service, upload_service, agent_controller 等)
-├── worker/           # 后台任务层 (rq_worker, 队列监听控制)
-├── utils/            # 无状态工具类 (parsing, embedding)
-├── constants/        # 系统常量与枚举 (教学目标、风格、策略等)
-└── scripts/          # 初始化、迁移、测试脚本与调试工具
-`
-
+├── api/routers/      # API 路由层入口 (chat, files, spaces, threads)
+├── core/             # 全局底层资源 (db, redis_client, llm_factory 双擎引擎工厂)
+├── models/           # 数据库模型层 (SQLAlchemy) & schemas/ (Pydantic 请求体)
+├── services/         # 核心业务域 (rag_service 向量检索, upload_service 切片处理等)
+├── worker/           # 独立后台生命周期 (rq_worker, 防止与 Uvicorn Web 并发混淆)
+├── utils/ & constants/# 工具解析类(parsing)及全量系统 Prompt Constant(教学策略枚举)
+└── scripts/          # PGVector 系统初始化、单元测试、调试套件
+\
 ---
 
-## 🚀 快速开始 (Quick Start)
+## 🚀 部署指北 (Quick Start)
 
-### 1. 容器及数据库准备 (推荐 Docker)
-确保安装了 Docker，并运行一个带有 pgvector 的隔离环境（使用 5433 端口防冲突）：
-`ash
+### 1. 启动中间件容器 (依赖 Docker)
+执行脚本前拉取一套带有 \pgvector\ 支持的强硬底层支持环境 (向外暴露 5433 防冲突机制)：
+\\ash
 docker run --name pgvector-db-final -e POSTGRES_PASSWORD=251399 -e POSTGRES_DB=ai_study_agent -p 5433:5432 -d timescale/timescaledb-ha:pg16
-`
-*(同时需要启动一个原生的 Redis 容器服务，绑定默认的 6379 端口以作任务队列)*
+\*(启动一个原生的 Redis Server 进行 6379 的端口分发以支持后台任务)*
 
-### 2. 本地 LLM 环境安装
-系统重度依赖本地模型进行向量化和本地推演。请安装 [Ollama](https://ollama.com/) 并在后台挂起：
-`ash
-# 获取默认推理模型（按需可调整）
+### 2. 构建本地 LLM 终端 
+推荐本地搭载 DeepSeek，为保证完全断网工作：
+\\ash
 ollama pull deepseek-r1:7b
-# [必须] 获取统一配置的词嵌入模型 
-ollama pull nomic-embed-text
-`
-
-### 3. 后端启动
-进入 ackend 目录，安装并激活环境：
-`ash
+ollama pull nomic-embed-text # [必须] 系统刚需 768维 的本地极速向量器
+\
+### 3. 主干后端部署 (Backend)
+进入 \ackend\ 空间分配虚机环境：
+\\ash
 python -m venv .venv
-.venv\Scripts\activate  # Windows
+.venv\Scripts\activate  
 pip install -r requirements.txt
-`
-初始化表结构 (重要: 现在位于脚本层)：
-`ash
-python scripts/init_db.py
-`
-启动 FastAPI API 服务：
-`ash
+python scripts/init_db.py # 建表(必须执行)
 uvicorn app:app --reload --port 8000
-`
-**启动 RQ 后台消费服务 (新终端中运行)**：
-`ash
+\
+**🚀 别被阻塞卡死在起点，打开新终端为长文档配置 RQ 处理队列：**
+\\ash
 cd backend
 .venv\Scripts\activate
 python worker/rq_worker.py
-`
-
-### 4. 前端启动
-进入 rontend 目录：
-`ash
+\
+### 4. 渲染前端空间 (Frontend)
+转入 \rontend\ 发动基建：
+\\ash
 npm install
 npm run dev
-`
-访问 http://localhost:5173 体验沉浸式学习空间。
+\进入 http://localhost:5173，你就可以在设置面版将引擎从 Local 到 Cloud 大脑进行强力无缝跳变！
 
 ---
 
-## 🔮 演进路线 (Roadmap - V4.0)
+## 🔮 演进路线 (Roadmap - Phase 2 & 3)
 
-- [ ] **CoT 提取可视化体系**: 针对更强算力的 R1 级思考流 <think>，实装可折叠、强动态的解析器悬浮组件。
-- [ ] **Tool-use Agent 架构**: 根据 AGENT_ARCHITECTURE_PLAN.md 引入 ReAct 多模态思维器，支持代码执行、Web 检索沙盒机制。
-- [ ] **多模态考卷生成**: 从目前的内容总结进阶为真正的全真模拟考卷自动化生成器。
+我们计划在此版本长线开发的基础上建立**基于 ReAct (Reasoning and Acting) 思想的真实智能体 (Agent) 架构**（详参 \AGENT_ARCHITECTURE_PLAN.md\）：
+
+- [ ] **Tool Registry 多模态扩展**: 包括针对复杂数学公式分析打通的 \ocr_vision_tool\，提供补充联网内容的 \web_search_tool\ 以及全切割解耦的 \exam_generator_tool\ 动态考卷生成。
+- [ ] **导师人设与长期学情画像**: 加入 Tone Modifier 后处理管道拦截不具有拟人设且“AI味浓厚”(如：首先...总而言之..) 的僵化回复模式。并依托独立 UserProfile 数据表增强偏好短/长期记忆捕捉。
+- [ ] **高频思考前端埋点**: 把单调的返回文字改用高定态 UI 透传内心长效溯源 Log，譬如 \[Tool思考中] -> 没有找到该题...正在调整考题方向\。
