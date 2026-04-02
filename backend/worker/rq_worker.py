@@ -11,7 +11,7 @@ if os.name == 'nt':
 
 import sys
 from rq import Worker, Queue, SimpleWorker
-from redis_client import redis_conn
+from core.redis_client import redis_conn
 
 listen = ['ai_study_tasks']
 

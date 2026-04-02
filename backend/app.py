@@ -14,9 +14,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # 安全初始化数据库架构
-from db import engine, Base
+from core.db import engine, Base
 from sqlalchemy import text
-import models
+import models.database as models
 try:
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
@@ -26,7 +26,7 @@ try:
 except Exception as e:
     print("DB Init Error:", e)
 
-from routers import spaces, files, threads, chat
+from api.routers import spaces, files, threads, chat
 
 app = FastAPI(title="AI Study Agent V1")
 

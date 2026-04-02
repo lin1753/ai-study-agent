@@ -1,8 +1,8 @@
-from models import ExplanationBranch, KnowledgeBlockORM, new_id
-from embedding import embed_text
-from llm import generate_explanation
-from store import explanation_branches
-from db import SessionLocal
+from models.database import ExplanationBranch, KnowledgeBlockORM, new_id
+from utils.embedding import embed_text
+from core.llm_legacy import generate_explanation
+from services.store import explanation_branches
+from core.db import SessionLocal
 
 def create_explanation_branch(kb_id: str, branch_type: str) -> ExplanationBranch:
     db = SessionLocal()

@@ -1,7 +1,7 @@
 # init_db.py
 from sqlalchemy import text
-from db import engine, Base
-import models
+from core.db import engine, Base
+import models.database as models
 
 def init_db():
     print("Dropping old tables...")

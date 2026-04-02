@@ -1,6 +1,6 @@
 # store.py
 
-from models import KnowledgeBlockORM, ExplanationBranch
+from models.database import KnowledgeBlockORM, ExplanationBranch
 
 # 数据存储（在内存中，简单示范）
 knowledge_blocks = {}

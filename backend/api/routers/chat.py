@@ -6,10 +6,10 @@ import logging
 import re
 import uuid
 
-from db import get_db, SessionLocal
-from models import ConversationSpace, MainThread, BranchThread, Message, RoleType
-from schemas.chat import ChatRequest
-from llm_service import get_llm_service
+from core.db import get_db, SessionLocal
+from models.database import ConversationSpace, MainThread, BranchThread, Message, RoleType
+from models.schemas.chat import ChatRequest
+from core.llm_factory import get_llm_service
 from services.rag_service import search_related_blocks
 from prompts.constants import MAIN_THREAD_SYSTEM_PROMPT, SOCRATES_SYSTEM_PROMPT
 

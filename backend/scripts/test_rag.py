@@ -1,8 +1,8 @@
 import os
 from sqlalchemy.orm import Session
-from db import SessionLocal
-from models import ConversationSpace, FileRecord, KnowledgeBlock
-from llm_service import get_llm_service
+from core.db import SessionLocal
+from models.database import ConversationSpace, FileRecord, KnowledgeBlock
+from core.llm_factory import get_llm_service
 from services.rag_service import search_related_blocks
 import traceback
 

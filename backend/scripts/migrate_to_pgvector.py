@@ -1,5 +1,5 @@
 from sqlalchemy import text
-from db import engine
+from core.db import engine
 
 def migrate_to_vector():
     try:

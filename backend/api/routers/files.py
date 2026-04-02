@@ -6,11 +6,11 @@ import json
 import traceback
 import logging
 
-from db import get_db
-from models import FileRecord
-from redis_client import task_queue
+from core.db import get_db
+from models.database import FileRecord
+from core.redis_client import task_queue
 from rq.job import Job
-from redis_client import redis_conn
+from core.redis_client import redis_conn
 from services.upload_service import merge_roadmap_chunks, process_upload_task
 
 logger = logging.getLogger(__name__)

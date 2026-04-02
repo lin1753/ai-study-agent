@@ -1,13 +1,13 @@
 # explanation_chat.py
 from sqlalchemy.orm import Session
-from models import ExplanationBranch, BranchMessage
+from models.database import ExplanationBranch, BranchMessage
 import requests
 import json
 import re
 from datetime import datetime
 
 from teaching_styles import get_style_prompt
-from teaching_judge import judge_answers
+from services.teaching_judge import judge_answers
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "qwen3-vl:4b"

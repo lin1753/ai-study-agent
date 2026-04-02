@@ -4,10 +4,10 @@ from typing import List
 import json
 import logging
 
-from db import get_db
-from models import ConversationSpace, MainThread, KnowledgeBlock
-from schemas.space import SpaceCreate, SpaceResponse, SpaceConfigUpdate
-from schemas.roadmap import MasteryUpdate
+from core.db import get_db
+from models.database import ConversationSpace, MainThread, KnowledgeBlock
+from models.schemas.space import SpaceCreate, SpaceResponse, SpaceConfigUpdate
+from models.schemas.roadmap import MasteryUpdate
 
 logger = logging.getLogger(__name__)
 

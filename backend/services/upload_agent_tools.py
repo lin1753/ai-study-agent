@@ -1,7 +1,7 @@
 ﻿import json
 import logging
 
-from agent_controller import StudyAgent, Tool
+from services.agent_controller import StudyAgent, Tool
 
 logger = logging.getLogger(__name__)
 

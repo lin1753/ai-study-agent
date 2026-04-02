@@ -3,10 +3,10 @@ from sqlalchemy.orm import Session
 import json
 import logging
 
-from db import get_db
-from models import ConversationSpace, KnowledgeBlock, BranchThread, Message, RoleType, ThreadStatus, FileRecord
-from schemas.chat import BranchCreate
-from llm_service import get_llm_service
+from core.db import get_db
+from models.database import ConversationSpace, KnowledgeBlock, BranchThread, Message, RoleType, ThreadStatus, FileRecord
+from models.schemas.chat import BranchCreate
+from core.llm_factory import get_llm_service
 
 logger = logging.getLogger(__name__)
 

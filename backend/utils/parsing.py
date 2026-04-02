@@ -110,7 +110,7 @@ def parse_pdf_ocr(filepath: str, user_config: dict = None) -> list[str]:
     Otherwise, fallback to local Tesseract OCR (0 VRAM).
     """
     import fitz  # pymupdf
-    from llm_service import get_llm_service
+    from core.llm_factory import get_llm_service
     
     blocks = []
     

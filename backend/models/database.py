@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import Column, String, Text, ForeignKey, DateTime, Boolean, Enum
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
-from db import Base
+from core.db import Base
 
 def generate_uuid():
     return uuid.uuid4().hex
