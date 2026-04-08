@@ -21,8 +21,8 @@
 1. **重构异步文件管道 (Redis Queue)**：接入 RQ（Redis Queue）解耦文件切片与抽取，确保 100 页以上大范围 PDF 解析时后端 API 能 202 异步放行，防止连接断开。前后端采用状态重试轮询设计获取进度。
 2. **构建企业级 RAG (PostgreSQL pgvector)**：借助 Docker 部署带有 pgvector 扩展的 PostgreSQL，将 
 omic-embed-text 生成的高维向量（768维）通过 SQLAlchemy 入库，并在会话发生前基于余弦距离 cosine_distance 进行 Top-3 的知识召回与上下文截断。
-3. **架构双引擎路由基建 (Dual-Engine LLM Factory)**：利用策略模式整合云端 API（OpenAI协议）和本地 Ollama 终端引擎。创新性地使文本生成支持动态热切换云/地算力，而向量化 Embedding强锚定到本地 http://localhost:11434 闭环以避免云端切换造成的向量维数灾难。
-4. **前端流式图谱引擎**: 实现响应拦截器。通过解析流数据的 easoning_content 保留 <think> 思考链显示。通过检测 XML 操作（如：<UPDATE_KNOWLEDGE>_level_）来双向绑定前端 React 面板实时更新大纲状态。
+3. **架构双引擎路由基建 (Dual-Engine LLM Factory & Vision Fallback)**：利用策略模式整合云端 API（OpenAI协议）和本地 Ollama 终端引擎。创新性地使文本生成支持动态热切换云/地算力，而向量化 Embedding强锚定到本地闭环以避免云端切换造成的向量维数灾难。同时引入基于 ONNX Runtime 的 RapidOCR作为视觉兜底引擎（Vision Fallback），解决高度图像化的 PDF/PPT 的结构化提取。
+4. **前端流式图谱与心流引擎 (Optimistic UI)**: 实现响应拦截与多阶段状态流转。通过解析流数据的 reasoning_content 保留 <think> 思考链显示；在耗时的支线 RAG 线程创建期采用“骨架屏+呼吸占位文案”防死机补偿；通过检测 XML 操作（如：<UPDATE_KNOWLEDGE>）来双向绑定前端 React 面板实时更新大纲状态。
 
 ### 结果 (Result)
 * 平台抗压性明显提高：大文档解析请求从原来的 504 Timeout 转变为毫秒级相应并依托 Worker 节点在后台平滑排队。

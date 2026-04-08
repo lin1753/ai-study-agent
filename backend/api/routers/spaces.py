@@ -66,6 +66,10 @@ def update_space_config(space_id: str, config: SpaceConfigUpdate, db: Session = 
     current_config = json.loads(space.config_data or "{}")
     current_config["priority_chapters"] = config.priority_chapters
     current_config["exam_weights"] = config.exam_weights
+    current_config["llm_provider"] = config.llm_provider
+    current_config["llm_api_key"] = config.llm_api_key
+    current_config["llm_base_url"] = config.llm_base_url
+    current_config["llm_model"] = config.llm_model
     space.config_data = json.dumps(current_config)
     
     db.commit()

@@ -3,9 +3,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { BookOpen, Plus, Settings, Trash2, Edit2 } from 'lucide-react';
 import * as API from '../api';
 import clsx from 'clsx';
+import SettingsModal from './SettingsModal';
 
 export default function Sidebar() {
     const [spaces, setSpaces] = useState([]);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const navigate = useNavigate();
     const { spaceId } = useParams();
 
@@ -110,11 +112,20 @@ export default function Sidebar() {
 
             {/* Footer */}
             <div className="p-4 border-t border-gray-800">
-                <button className="flex items-center gap-2 text-sm hover:text-white transition w-full">
+                <button 
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="flex items-center gap-2 text-sm hover:text-white transition w-full"
+                >
                     <Settings size={16} />
                     <span>Settings</span>
                 </button>
             </div>
+
+            {/* Global Settings Modal */}
+            <SettingsModal 
+                isOpen={isSettingsOpen} 
+                onClose={() => setIsSettingsOpen(false)} 
+            />
         </div>
     );
 }

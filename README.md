@@ -104,10 +104,13 @@ npm run dev
 
 ---
 
-## 🔮 演进路线 (Roadmap - Phase 2 & 3)
+## 🔮 演进路线 (Roadmap - Current Progress)
 
-我们计划在此版本长线开发的基础上建立**基于 ReAct (Reasoning and Acting) 思想的真实智能体 (Agent) 架构**（详参 \AGENT_ARCHITECTURE_PLAN.md\）：
+我们已经在此版本长线开发的基础上建立并完善了**基于 ReAct 面向教陪场景的真实智能体 (Agent) 架构**（更多拆解详参 `AGENT_ARCHITECTURE_PLAN.md`）：
 
-- [ ] **Tool Registry 多模态扩展**: 包括针对复杂数学公式分析打通的 \ocr_vision_tool\，提供补充联网内容的 \web_search_tool\ 以及全切割解耦的 \exam_generator_tool\ 动态考卷生成。
-- [ ] **导师人设与长期学情画像**: 加入 Tone Modifier 后处理管道拦截不具有拟人设且“AI味浓厚”(如：首先...总而言之..) 的僵化回复模式。并依托独立 UserProfile 数据表增强偏好短/长期记忆捕捉。
-- [ ] **高频思考前端埋点**: 把单调的返回文字改用高定态 UI 透传内心长效溯源 Log，譬如 \[Tool思考中] -> 没有找到该题...正在调整考题方向\。
+- [x] **主线/支线异步解耦 (Main vs Branch Threading)**: 告别传统的单调聊天域，引入主支线隔离概念（类似游戏中的主线任务与支线小灶）。
+- [x] **后端按需自测工具 (On-Demand Exam Generator)**: 放弃原来长篇大段死板解析全出题的做法。在独立支线向 `Agent_Controller` 注册专门的按需成卷方法，彻底解耦解析和出题。
+- [x] **RapidOCR 纯视觉兜底解析 (Vision Fallback OCR)**: 在 PDF 解析链路里切入不依赖于庞大 C++ 环境的 `RapidOCR ONNX Runtime`。跨越所有只能读取文本的软肋，直面高度扫描件和纯图 PPT，实现零漏抓的提取并完美交付回 DeepSeek 提纯。
+- [x] **支线侧载补充 RAG (Side-Loading RAG)**: 我们创新性允许在专注单一知识点的支线小灶期间补充外围截图（即时注入 KnowledgeBlocks 表中关联 RAG），在**不破坏主线长篇大纲**的前提下直接扩展弹药提供精确回答。
+- [x] **高频心流前端埋点与过渡动画 (Optimistic Flow UI)**: 针对创建独立线程、生成模型前的后端阻塞加入阶段过渡提示器。并在流式数据上打点 `<think>` 或 Tools Call 日志给用户透传“Agent的潜意识”。
+- [ ] **导师人设与长期学情画像 (Tone Modifier)**: *(待开发)* 加入 Tone Modifier 改变大模型浓重的 AI 味模板文本回复，依托独立 UserProfile 数据表增强偏好记忆。

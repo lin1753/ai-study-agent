@@ -11,6 +11,8 @@ from models.database import ConversationSpace, MainThread, BranchThread, Message
 from models.schemas.chat import ChatRequest
 from core.llm_factory import get_llm_service
 from services.rag_service import search_related_blocks
+from services.agent_controller import StudyAgent
+from services.agent_tools import get_rag_search_tool, get_web_search_tool
 from prompts.constants import MAIN_THREAD_SYSTEM_PROMPT, SOCRATES_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -114,33 +116,45 @@ def chat_main_stream(payload: ChatRequest, background_tasks: BackgroundTasks, db
     space = db.query(ConversationSpace).filter(ConversationSpace.id == main_thread.space_id).first()
     user_config = json.loads(space.config_data or "{}") if space else {}
 
-    # === RAG 检索介入 ===
-    # 针对用户的最新问题，在知识库中检索出最相关的片段，来辅助主线回答
-    rag_context = ""
-    try:
-        if space:
-            related_blocks = search_related_blocks(db, space.id, payload.content, top_k=3, user_config=user_config)
-            if related_blocks:
-                rag_context = "【检索到的参考资料】\n" + "\n---\n".join(b.raw_text for b in related_blocks) + "\n\n"
-    except Exception as e:
-        logger.error(f"RAG Retrieval failed in main chat: {e}")
-        
     system_prompt = MAIN_THREAD_SYSTEM_PROMPT.format(roadmap_data=roadmap_data)
-    if rag_context:
-        system_prompt += f"\n\n请参考以下检索内容的具体细节来回答用户问题（如果回答不需要则忽略）：\n{rag_context}"
 
-    messages_for_llm = [{"role": "system", "content": system_prompt}]
-    for m in history:
-        messages_for_llm.append({"role": m.role.value, "content": m.content})
+    messages_history = []
+    # Include history up to last message (exclude current payload as it's included in run_stream)
+    for m in history[:-1]:
+        messages_history.append({"role": m.role.value, "content": m.content})
 
     def iter_response():
         llm = get_llm_service(user_config)
-        full_response = ""
-        for chunk in llm.chat_stream(messages_for_llm):
-            full_response += chunk
-            yield chunk
+        agent = StudyAgent(llm_service=llm, max_steps=5)
         
-        # 安全地将其交由BackgroundTasks去落盘，不仅避免占坑还在生成完毕后立即响应
+        # Determine Tavily Key from user_config or environment
+        tavily_key = user_config.get("tavily_api_key") or "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"
+        
+        if space:
+            agent.register_tool(get_rag_search_tool(space.id, SessionLocal))
+        
+        agent.register_tool(get_web_search_tool(api_key=tavily_key))
+        
+        # Override the agent's base system prompt to include roadmap instructions
+        agent.system_prompt = agent.system_prompt + f"\n\n### 上下文要求:\n{system_prompt}\n"
+
+        full_response = ""
+        try:
+            for sse_data in agent.run_stream(payload.content, history=messages_history):
+                # We yield the SSE strings directly from the generator
+                # e.g. "data: {"type": ..., "content": ...}\n\n"
+                # Keep accumulating the message tokens for the database
+                parsed = json.loads(sse_data[6:].strip()) if sse_data.startswith("data: ") else {}
+                if parsed.get("type") == "message":
+                    full_response += parsed.get("content", "")
+                
+                yield sse_data
+        except Exception as e:
+            logger.error(f"Error in agent stream: {e}")
+            yield f"data: {json.dumps({'type': 'message', 'content': '[Server Error] ' + str(e)})}\n\n"
+            yield "data: {\"type\": \"done\", \"content\": \"\"}\n\n"
+        
+        # 记录 AI 回执
         background_tasks.add_task(save_main_chat_and_mutate, payload.thread_id, full_response)
 
     return StreamingResponse(iter_response(), media_type="text/event-stream")
@@ -161,24 +175,44 @@ def chat_stream(payload: ChatRequest, background_tasks: BackgroundTasks, db: Ses
     thread = db.query(BranchThread).filter(BranchThread.id == payload.thread_id).first()
     block_text = ""
     user_config = {}
-    if thread and thread.source_block:
-        block_text = f"关联知识点内容：\n{thread.source_block.raw_text}\n\n"
+    space = None
+    if thread:
         space = db.query(ConversationSpace).filter(ConversationSpace.id == thread.space_id).first()
         if space:
             user_config = json.loads(space.config_data or "{}")
+            
+    if thread and thread.source_block:
+        block_text = f"关联知识点内容：\n{thread.source_block.raw_text}\n\n"
 
     system_prompt = SOCRATES_SYSTEM_PROMPT.format(block_text=block_text)
     
-    messages_for_llm = [{"role": "system", "content": system_prompt}]
-    for m in history:
-        messages_for_llm.append({"role": m.role.value, "content": m.content})
+    # We filter out the latest user message from history because agent.run_stream takes the initial content
+    messages_history = [{"role": m.role.value, "content": m.content} for m in history[:-1]]
 
     def iter_response():
-        llm = get_llm_service(user_config)
+        from services.agent_tools import get_exam_generator_tool
+        agent = StudyAgent(user_config=user_config)
+        agent.system_prompt = system_prompt
+        
+        tavily_key = user_config.get("tavily_api_key") or "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"
+        agent.register_tool(get_web_search_tool(api_key=tavily_key))
+
+        if space:
+            agent.register_tool(get_rag_search_tool(space.id, SessionLocal))
+            agent.register_tool(get_exam_generator_tool(space.id, SessionLocal))
+            
         full_response = ""
-        for chunk in llm.chat_stream(messages_for_llm):
-            full_response += chunk
-            yield chunk
+        try:
+            for sse_data in agent.run_stream(payload.content, history=messages_history):
+                parsed = json.loads(sse_data[6:].strip()) if sse_data.startswith("data: ") else {}
+                if parsed.get("type") == "message":
+                    full_response += parsed.get("content", "")
+                
+                yield sse_data
+        except Exception as e:
+            logger.error(f"Error in agent stream: {e}")
+            yield f"data: {json.dumps({'type': 'message', 'content': '[Server Error] ' + str(e)})}\n\n"
+            yield "data: {\"type\": \"done\", \"content\": \"\"}\n\n"
         
         background_tasks.add_task(save_branch_chat, payload.thread_id, full_response)
 

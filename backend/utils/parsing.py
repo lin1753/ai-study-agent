@@ -1,7 +1,12 @@
 # parsing.py
 import os
+import logging
 from pypdf import PdfReader
 from pptx import Presentation
+
+# Mute noisy pdfminer warnings (like FontBBox issues)
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
+logger = logging.getLogger(__name__)
 
 import re
 try:
@@ -89,96 +94,70 @@ def parse_pdf(filepath: str, user_config: dict = None) -> list[str]:
     total_len = sum(len(b) for b in blocks)
     logger.info(f"[DEBUG] Total text length from extractors: {total_len}")
     
-    if total_len < 1000: # Increased threshold to be safer
-        logger.warning(f"[WARN] Text extraction yielded only {total_len} chars (< 1000). Attempting OCR...")
-        # Pass user_config to OCR to let it decide between cloud VLM and local Tesseract
-        ocr_blocks = parse_pdf_ocr(filepath, user_config=user_config) 
-        blocks.extend(ocr_blocks)
+    # If the document yields less than 1000 characters (e.g. image-heavy slides), fallback to OCR
+    if total_len < 1000:
+        logger.warning(f"[WARN] Text extraction yielded only {total_len} chars (< 1000). Attempting RapidOCR via PyMuPDF...")
+        ocr_blocks = parse_pdf_ocr(filepath) 
+        if ocr_blocks:
+            blocks.extend(ocr_blocks)
         total_len = sum(len(b) for b in blocks)
-        logger.info(f"[DEBUG] Total text length after OCR: {total_len}")
+        logger.info(f"[DEBUG] Total text length after OCR fallback: {total_len}")
 
-    print(f"[DEBUG] Final Extracted {len(blocks)} non-empty blocks.")
+    logger.info(f"[DEBUG] Final Extracted {len(blocks)} non-empty blocks.")
     return blocks
 
-import logging
-logger = logging.getLogger(__name__)
-
-def parse_pdf_ocr(filepath: str, user_config: dict = None) -> list[str]:
+def parse_pdf_ocr(filepath: str) -> list[str]:
     """
-    Convert PDF pages to images and use OCR.
-    If cloud API is configured, use the cloud VLM.
-    Otherwise, fallback to local Tesseract OCR (0 VRAM).
+    Fallback method: Convert PDF pages to images using PyMuPDF and run pure-Python OCR (RapidOCR) 
+    to extract text from heavily image-based documents. Very fast on CPU.
     """
-    import fitz  # pymupdf
-    from core.llm_factory import get_llm_service
-    
     blocks = []
     
-    use_cloud_vlm = False
-    llm = None
-    if user_config and user_config.get("llm_provider") == "cloud":
-        use_cloud_vlm = True
-        llm = get_llm_service(user_config)
-        logger.info("[OCR] Using Cloud VLM for OCR.")
-    else:
-        logger.info("[OCR] Using local Tesseract for OCR.")
-        try:
-            import pytesseract
-            from PIL import Image
-        except ImportError:
-            logger.error("[OCR] pytesseract or Pillow not installed. Cannot perform local OCR.")
-            return []
+    try:
+        import fitz  # PyMuPDF
+        import numpy as np
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError as e:
+        logger.error(f"[OCR] Required packages not found. Please run 'pip install pymupdf rapidocr_onnxruntime'. Error: {e}")
+        return []
 
     try:
+        logger.info("[OCR] Initializing RapidOCR ONNX model...")
+        # Initialize OCR engine
+        engine = RapidOCR()
+        
         doc = fitz.open(filepath)
-        logger.info(f"[OCR] Processing {len(doc)} pages for {filepath}...")
+        logger.info(f"[OCR] Total {len(doc)} pages detected. Starting OCR extraction...")
         
-        max_pages = 20
+        # We limit the max pages just in case to prevent infinite hangs, though RapidOCR is very fast.
+        max_pages = min(len(doc), 50) 
         
-        for i, page in enumerate(doc):
-            if i >= max_pages:
-                logger.warning(f"[OCR] Limit reached ({max_pages} pages). Stopping for performance.")
-                break
-                
-            logger.debug(f"[OCR] Rendering page {i}...")
-            pix = page.get_pixmap(dpi=150)
+        for i in range(max_pages):
+            page = doc[i]
+            logger.debug(f"[OCR] Processing page {i+1}/{max_pages}...")
             
-            text = ""
-            if use_cloud_vlm and llm:
-                img_bytes = pix.tobytes("png")
-                # Need to implement ocr_image in CloudAPIService if not exists, or pass image as base64 to chat
-                # Assuming ocr_image is implemented or we fallback to string extraction
-                try:
-                    text = llm.ocr_image(img_bytes) 
-                except AttributeError:
-                    logger.warning("[OCR] Cloud provider doesn't support ocr_image yet. Skipping page.")
-            else:
-                # Local Tesseract
-                from PIL import Image
-                import io
-                img = Image.open(io.BytesIO(pix.tobytes("png")))
-                # Specify languages if needed: lang='chi_sim+eng'
-                # Note: User needs to have tesseract installed on Windows and in PATH
-                try:
-                    # In python, tesseract might need to be explicitly pointed to the exe on Windows
-                    # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-                    text = pytesseract.image_to_string(img, lang='chi_sim+eng')
-                except Exception as eval_e:
-                    logger.error(f"[OCR] Tesseract failed on page {i}: {eval_e}. Is Tesseract installed on your system?")
-                    text = ""
+            # Render page to zoom 2.0 (around 144 DPI) which is a sweet spot for RapidOCR
+            zoom_matrix = fitz.Matrix(2.0, 2.0)
+            pix = page.get_pixmap(matrix=zoom_matrix, alpha=False)
+            
+            # Convert PyMuPDF unformatted raw bytes to NumPy array (H, W, Channels)
+            img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+            
+            # Run OCR prediction on the numpy image
+            # Result format: List of [ [ [x, y], ...], "Extracted Text", Confidence ]
+            ocr_result, elapse = engine(img_array)
+            
+            if ocr_result:
+                # Combine all text blocks detected on this page
+                page_text = "\n".join([item[1] for item in ocr_result])
+                cleaned = clean_text(page_text)
+                if cleaned:
+                    blocks.append(cleaned)
+                    
+        logger.info(f"[OCR] Completed processing {max_pages} pages.")
 
-            # Remove markdown code blocks if LLM outputs them (mostly for cloud VLM)
-            text = text.replace("```", "")
-            
-            cleaned = clean_text(text)
-            
-            if cleaned:
-                blocks.append(cleaned)
-            else:
-                logger.warning(f"[OCR] Page {i} yielded empty text after cleaning.")
-                
     except Exception as e:
-        logger.error(f"[OCR] Pipeline failed: {e}", exc_info=True)
+        logger.error(f"[OCR] Fatal error during RapidOCR execution: {e}", exc_info=True)
         
     return blocks
 

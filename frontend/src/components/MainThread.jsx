@@ -5,7 +5,6 @@ import clsx from 'clsx';
 import * as API from '../api';
 // import ReactMarkdown from "react-markdown";
 import KnowledgeCard from './KnowledgeCard';
-import ExamConfigModal from './ExamConfigModal';
 
 export default function MainThread({ spaceId, onOpenBranch }) {
     const [roadmap, setRoadmap] = useState([]);
@@ -15,9 +14,9 @@ export default function MainThread({ spaceId, onOpenBranch }) {
     const [loading, setLoading] = useState(false);
     const fileInputRef = useRef(null);
     const [uploading, setUploading] = useState(false);
+    const [uploadLogs, setUploadLogs] = useState([]);
     const [chatMsg, setChatMsg] = useState('');
-    const [showConfigModal, setShowConfigModal] = useState(false);
-    const [pendingFile, setPendingFile] = useState(null);
+    const [agentThoughts, setAgentThoughts] = useState('');
     const chatEndRef = useRef(null);
 
     useEffect(() => {
@@ -86,63 +85,73 @@ export default function MainThread({ spaceId, onOpenBranch }) {
         }
     };
 
-    const handleFileSelect = (e) => {
+    const handleFileSelect = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
 
-        // Store file and show config modal
-        setPendingFile(file);
-        setShowConfigModal(true);
-
-        // Reset file input
-        e.target.value = '';
-    };
-
-    const handleConfigSubmit = async (config) => {
-        if (!pendingFile) return;
+        // Read global AI config from localStorage
+        const config = {
+            exam_weights: {}, // Disable weights logic
+            priority_chapters: [], // Extract all content
+            llm_provider: localStorage.getItem('llm_provider') || 'local',
+            llm_api_key: localStorage.getItem('llm_api_key') || '',
+            llm_base_url: localStorage.getItem('llm_base_url') || 'https://api.deepseek.com/v1',
+            llm_model: localStorage.getItem('llm_model') || 'deepseek-chat'
+        };
 
         setUploading(true);
+        setUploadLogs(['文件正在上传...']);
         try {
+            // Update space with global config settings
             await API.updateSpaceConfig(spaceId, config);
-            const uploadRes = await API.uploadFile(spaceId, pendingFile);
             
-            // Check if it's async (returns job_id)
+            // Start upload and extraction pipeline
+            const uploadRes = await API.uploadFile(spaceId, file);
+            
             if (uploadRes.data && uploadRes.data.job_id) {
                 const jobId = uploadRes.data.job_id;
                 
-                // Poll for status
+                // Poll for completion
                 const pollInterval = setInterval(async () => {
                     try {
                         const statusRes = await API.getFileStatus(jobId);
+                        
+                        if (statusRes.data.message) {
+                            setUploadLogs(prev => {
+                                if (prev.length === 0 || prev[prev.length - 1] !== statusRes.data.message) {
+                                    return [...prev, statusRes.data.message];
+                                }
+                                return prev;
+                            });
+                        }
+
                         if (statusRes.data.status === 'completed') {
                             clearInterval(pollInterval);
                             await loadData();
                             setUploading(false);
-                            setPendingFile(null);
+                            setUploadLogs(prev => [...prev, '资料解析完成！']);
                         } else if (statusRes.data.status === 'failed') {
                             clearInterval(pollInterval);
                             alert("后台解析失败，请检查服务日志。");
                             setUploading(false);
-                            setPendingFile(null);
+                            setUploadLogs(prev => [...prev, '资料解析失败！']);
                         }
-                        // if processing, continue polling...
                     } catch (pollErr) {
                         console.error("Polling error", pollErr);
-                        // Optionally clear interval on consistent errors, but we keep trying for now
                     }
                 }, 3000);
             } else {
-                // Fallback for synchronous API
                 await loadData();
                 setUploading(false);
-                setPendingFile(null);
             }
         } catch (error) {
             console.error("Upload failed", error);
             alert(error.response?.data?.detail || "上传失败，请确保后台服务已启动或网络正常。");
             setUploading(false);
-            setPendingFile(null);
         }
+
+        // Reset file input
+        e.target.value = '';
     };
 
     const handleSendMainChat = async () => {
@@ -151,6 +160,7 @@ export default function MainThread({ spaceId, onOpenBranch }) {
         const userMsg = { role: 'user', content: chatMsg, created_at: new Date().toISOString() };
         setMessages(prev => [...prev, userMsg]);
         setChatMsg('');
+        setAgentThoughts(''); // 开始新的推理轨迹
 
         try {
             const response = await fetch(API.getMainChatStreamUrl(), {
@@ -164,6 +174,7 @@ export default function MainThread({ spaceId, onOpenBranch }) {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let aiContent = '';
+            let sseBuffer = '';
 
             // Add initial empty AI message
             setMessages(prev => [...prev, { role: 'assistant', content: '', created_at: new Date().toISOString() }]);
@@ -171,42 +182,63 @@ export default function MainThread({ spaceId, onOpenBranch }) {
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) {
-                    // Stream finished: if any action was present, refresh the roadmap
                     if (aiContent.includes('<ACTION>')) {
                         await loadData();
                     }
+                    setTimeout(() => setAgentThoughts(''), 2000); // 延迟清理，让用户多看一会儿思考完成状态
                     break;
                 }
+                
                 const chunk = decoder.decode(value, { stream: true });
-                aiContent += chunk;
+                sseBuffer += chunk;
+                
+                // Split by double newline which divides SSE events
+                const events = sseBuffer.split('\n\n');
+                // The last element is the remaining incomplete buffer
+                sseBuffer = events.pop() || '';
+                
+                for (const ev of events) {
+                    if (ev.startsWith('data: ')) {
+                        const jsonStr = ev.substring(6).trim();
+                        if (!jsonStr) continue;
+                        
+                        try {
+                            const data = JSON.parse(jsonStr);
+                            
+                            if (data.type === 'thought') {
+                                setAgentThoughts(prev => prev + data.content);
+                                setMessages(prev => {
+                                    const next = [...prev];
+                                    const last = next[next.length - 1];
+                                    last.thoughts = (last.thoughts || '') + data.content;
+                                    return next;
+                                });
+                            } else if (data.type === 'message') {
+                                aiContent += data.content;
+                                // V2.5/V3: Hide legacy <ACTION> XML tags from the user interface continuously
+                                const displayContent = aiContent.replace(/<ACTION>[\s\S]*?(?:<\/ACTION>|$)/g, '').trim();
 
-                // V2.5: Hide <ACTION> XML tags from the user interface continuously
-                const displayContent = aiContent.replace(/<ACTION>[\s\S]*?(?:<\/ACTION>|$)/g, '').trim();
-
-                setMessages(prev => {
-                    const next = [...prev];
-                    next[next.length - 1].content = displayContent;
-                    return next;
-                });
+                                setMessages(prev => {
+                                    const next = [...prev];
+                                    next[next.length - 1].content = displayContent;
+                                    return next;
+                                });
+                            }
+                        } catch(e) {
+                            console.error("Failed to parse SSE JSON:", jsonStr, e);
+                        }
+                    }
+                }
             }
         } catch (error) {
             console.error("Chat error", error);
             setMessages(prev => [...prev, { role: 'assistant', content: "抱歉，出错了。", created_at: new Date().toISOString() }]);
+            setAgentThoughts('执行中断');
         }
     };
 
     return (
         <div className="flex flex-col h-full bg-white">
-            {/* Config Modal */}
-            <ExamConfigModal
-                isOpen={showConfigModal}
-                onClose={() => {
-                    setShowConfigModal(false);
-                    setPendingFile(null);
-                }}
-                onSubmit={handleConfigSubmit}
-            />
-
             {/* Header */}
             <div className="h-16 border-b border-gray-100 flex items-center justify-between px-6 bg-white/80 backdrop-blur-md sticky top-0 z-20 shadow-sm">
                 <h2 className="font-bold text-gray-800 flex items-center gap-2 text-lg">
@@ -236,7 +268,7 @@ export default function MainThread({ spaceId, onOpenBranch }) {
                         {uploading ? (
                             <>
                                 <span className="animate-spin w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full"></span>
-                                资料正在后排队解析中...
+                                解析中...
                             </>
                         ) : (
                             <>
@@ -258,6 +290,40 @@ export default function MainThread({ spaceId, onOpenBranch }) {
                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                                 正在规划学习路径...
                             </div>
+                        ) : uploading ? (
+                            <div className="flex flex-col bg-white border border-blue-100 rounded-3xl shadow-sm overflow-hidden min-h-[400px]">
+                                <div className="px-6 py-4 border-b border-gray-100 bg-blue-50 flex items-center gap-4 shrink-0">
+                                    <div className="bg-white p-2 text-blue-600 rounded-full shadow-sm relative">
+                                        <Upload size={20} className="animate-pulse" />
+                                        <div className="absolute inset-0 border-2 border-blue-400 rounded-full animate-ping opacity-20"></div>
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-gray-800 text-lg">解析引擎运行中</h3>
+                                        <p className="text-xs text-gray-500 mt-0.5">正在提取并重构知识图谱，这可能需要几十秒时间...</p>
+                                    </div>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-slate-50/50 custom-scrollbar font-mono text-sm max-h-[500px]">
+                                    {uploadLogs.map((log, index) => (
+                                        <div 
+                                            key={index} 
+                                            className={clsx(
+                                                "flex items-start gap-3 fade-in slide-in-top-2 duration-300",
+                                                index === uploadLogs.length - 1 ? "text-blue-700 font-medium" : "text-gray-400"
+                                            )}
+                                        >
+                                            <div className="shrink-0 mt-1">
+                                                {index === uploadLogs.length - 1 ? (
+                                                    <span className="flex w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)] animate-pulse" />
+                                                ) : (
+                                                    <span className="flex w-2 h-2 rounded-full bg-gray-300" />
+                                                )}
+                                            </div>
+                                            <span className="leading-5">{log}</span>
+                                        </div>
+                                    ))}
+                                    <div className="h-2" />
+                                </div>
+                            </div>
                         ) : roadmap.length > 0 ? (
                             <div className="py-2">
                                 {roadmap.map((chapter) => (
@@ -271,10 +337,15 @@ export default function MainThread({ spaceId, onOpenBranch }) {
                                 ))}
                             </div>
                         ) : (
-                            <div className="text-center py-10 text-gray-400 border-2 border-dashed border-gray-200 rounded-3xl">
-                                <Sparkles size={48} className="mx-auto mb-4 opacity-10" />
-                                <p>主线待开启</p>
-                                <p className="text-xs mt-2 text-gray-300">上传复习资料，我将为你定制专属复习卡片</p>
+                            <div 
+                                onClick={() => fileInputRef.current.click()}
+                                className="cursor-pointer group flex flex-col items-center justify-center text-center py-20 bg-gray-50/50 hover:bg-blue-50/50 border-2 border-dashed border-gray-200 hover:border-blue-300 rounded-3xl transition-all duration-300"
+                            >
+                                <div className="bg-white p-4 rounded-full shadow-sm mb-6 group-hover:scale-110 transition-transform duration-300 group-hover:text-blue-600 text-gray-400">
+                                    <Upload size={32} />
+                                </div>
+                                <h3 className="text-xl font-bold text-gray-700 mb-2">主线待开启</h3>
+                                <p className="text-sm text-gray-500 max-w-sm">点击此区域上传您的复习资料 (支持 PDF, PPT)。系统将自动提取大纲、知识点并生成专属自测题库。</p>
                             </div>
                         )}
                     </section>
@@ -303,6 +374,17 @@ export default function MainThread({ spaceId, onOpenBranch }) {
                                             {m.role === 'user' ? 'ME' : 'AI'}
                                         </div>
                                         <div className="flex-1 text-sm leading-relaxed text-gray-700 whitespace-pre-wrap pt-1 font-medium">
+                                            {m.role === 'assistant' && (m.thoughts || (idx === messages.length - 1 && agentThoughts)) && (
+                                                <div className="mb-4 bg-gray-50 border border-gray-100 rounded-lg p-3 text-xs text-gray-500 max-h-40 overflow-y-auto">
+                                                    <div className="flex items-center gap-2 mb-2 font-bold text-gray-400">
+                                                        <div className="w-2 h-2 bg-blue-400 rounded-full animate-ping"></div>
+                                                        Agent Trace
+                                                    </div>
+                                                    <div className="font-mono opacity-80 whitespace-pre-wrap">
+                                                        {m.thoughts || agentThoughts}
+                                                    </div>
+                                                </div>
+                                            )}
                                             {m.content}
                                         </div>
                                     </div>

@@ -107,30 +107,14 @@ def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: st
 
         main_thread = db.query(MainThread).filter(MainThread.space_id == space_id).first()
         if main_thread and llm.check_connection():
-            # Step 2: Use Agent Toolkit to handle parsing and exam generation
+            # Step 2: Use procedural toolkit to handle layout parsing and roadmap extraction
+            # According to Phase 5: Removed ExamGenerator and Agent ReAct loop from the main thread
             from services.upload_agent_tools import define_upload_tools
-            agent = StudyAgent(llm, max_steps=4)
             tools = define_upload_tools(space_id, record_id, texts, llm, user_config, db)
-            for t in tools:
-                agent.register_tool(t)
-
-            task_instruction = (
-                "你的任务是处理用户上传的新文档材料。请按顺序执行以下两个操作：\n"
-                "1. 调用 DocumentParser 工具，提取文档的知识点结构。\n"
-                "2. 拿到 DocumentParser 返回的大纲JSON文本后，将其作为 `roadmap_json` 参数，调用 ExamGenerator 工具生成考题。\n"
-                "请将生成的考题JSON数组和知识点大纲整理好汇报给我。"
-            )
             
-            logger.info("[Agent] Starting background ReAct loop for uploaded file...")
-            agent_result = agent.run(task_instruction=task_instruction)
-            logger.info(f"[Agent] Loop finished. Result snippet: {agent_result[:200]}")
+            logger.info("[Process] Starting procedural extraction loop for uploaded file...")
             
-            # Since the tools already do the heavy lifting internally, we can either extract the result from agent context,
-            # or we can pass a callback in the tool to save into DB.
-            # Fallback procedural approach, if agent didn't return exactly what we want:
-            logger.info("[Agent] Fallback procedural state saving just in case LLM routing dropped standard outputs.")
-            
-            # Execute Tool 1
+            # Execute Tool 1 (DocumentParser) directly
             doc_result = tools[0].run()
             res_json = json.loads(doc_result)
             chapters = res_json.get("extracted_chapters", [])
@@ -139,17 +123,6 @@ def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: st
             old_roadmap = json.loads(main_thread.roadmap_json or "[]")
             new_roadmap = old_roadmap + chapters
             main_thread.roadmap_json = json.dumps(new_roadmap)
-            
-            # Execute Tool 2
-            exam_result_str = tools[1].run(roadmap_json=json.dumps(chapters))
-            exam_json = json.loads(exam_result_str)
-            quiz = exam_json.get("exam_quiz", [])
-            
-            # Save the generated quiz to the DB (We will append it to summary for now since ExamRecord model is missing)
-            if quiz:
-                quiz_str = json.dumps(quiz, ensure_ascii=False, indent=2)
-                logger.info(f"Generated {len(quiz)} exam questions for new document. Appending to summary.")
-                main_thread.current_summary = (main_thread.current_summary or "") + "\n\n== 出题工具生成的课后自测题 ==\n" + quiz_str
 
             # Summary
             file_summary = llm.generate_summary(full_text_for_summary[:8000])
@@ -175,3 +148,99 @@ def process_upload_task(space_id: str, record_id: str, file_path: str, ftype: st
     finally:
         db.close()
 
+
+
+def process_supplementary_upload_task(space_id: str, record_id: str, file_path: str, ftype: str):
+    """处理碎片化补充水印上传(如长截图/网页)的后台任务：包含多模态OCR，写入 RAG 数据库"""
+    import logging
+    import json
+    from core.db import SessionLocal
+    from core.factories import get_llm_service
+    from models.database import ConversationSpace, FileRecord, KnowledgeBlock
+    from utils.parsing import parse_file
+    from rq import get_current_job
+
+    logger = logging.getLogger(__name__)
+    job = get_current_job()
+
+    def update_progress(msg: str):
+        logger.info(f"[Worker Progress] {msg}")
+        if job:
+            job.meta['progress_message'] = msg
+            job.save_meta()
+
+    db = SessionLocal()
+    try:
+        update_progress("正在获取空间数据...")
+        space = db.query(ConversationSpace).filter(ConversationSpace.id == space_id).first()
+        if not space:
+            raise Exception(f"Space {space_id} not found.")
+        
+        user_config = json.loads(space.config_data or "{}")
+        llm = get_llm_service(user_config)
+
+        update_progress("正在提取文件文本...")
+        texts = []
+        if ftype in ['pdf', 'ppt', 'pptx']:
+            texts = parse_file(file_path, ftype, user_config=user_config)
+        elif ftype in ['jpg', 'jpeg', 'png', 'webp']:
+            update_progress("检测到图像文件，正在调用本地 RapidOCR 提取文本...")
+            try:
+                from rapidocr_onnxruntime import RapidOCR
+                ocr_engine = RapidOCR()
+                res, _ = ocr_engine(file_path)
+                if res:
+                    extracted_text = "\n".join([line[1] for line in res if line[1]])
+                    if extracted_text.strip():
+                        texts.append(extracted_text)
+                        logger.info(f"RapidOCR successful: {len(extracted_text)} chars extracted from {file_path}")
+            except Exception as ocr_err:
+                logger.error(f"RapidOCR failed on {file_path}: {ocr_err}")
+        else:
+            # Try text files as fallback
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                texts.append(f.read())
+
+        if not texts:
+            logger.warning(f"No text extracted from file: {file_path}")
+            return {"status": "empty", "blocks_count": 0}
+
+        update_progress("文本提取完毕，正在写入 RAG 数据库...")
+        blocks = []
+        for idx, text in enumerate(texts):
+            vec = llm.get_embedding(text) if text.strip() else None
+            block = KnowledgeBlock(
+                space_id=space_id,
+                source_file_id=record_id,
+                raw_text=text,
+                chunk_index=f"supp_{idx}",
+                embedding=vec
+            )
+            db.add(block)
+            blocks.append(block)
+
+        db.commit()
+        update_progress("碎片合并上传完毕！")
+        
+        record = db.query(FileRecord).filter(FileRecord.id == record_id).first()
+        if record:
+            record.processed = True
+            db.commit()
+            
+        return {"status": "success", "blocks_count": len(blocks), "file_id": record_id}
+
+    except Exception as e:
+        logger.error(f"Error in supplementary upload task: {e}")
+        record = db.query(FileRecord).filter(FileRecord.id == record_id).first()
+        if record:
+            record.processed = False
+            db.commit()
+        raise e
+    finally:
+        db.close()
+        import os
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as err:
+            logger.error(f"Failed to clean up: {err}")

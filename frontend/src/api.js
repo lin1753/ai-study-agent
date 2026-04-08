@@ -16,6 +16,13 @@ export const uploadFile = (spaceId, file) => {
         headers: { 'Content-Type': 'multipart/form-data' },
     });
 };
+export const uploadSupplementaryFile = (spaceId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/spaces/${spaceId}/upload_supplementary`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+};
 export const getFileStatus = (jobId) => api.get(`/spaces/files/status/${jobId}`);
 export const getBlocks = (spaceId) => api.get(`/spaces/${spaceId}/blocks`);
 export const updateSpaceConfig = (spaceId, config) => api.put(`/spaces/${spaceId}/config`, config);

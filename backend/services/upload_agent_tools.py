@@ -60,9 +60,4 @@ def define_upload_tools(space_id, record_id, texts, llm, user_config, db):
         func=parse_document
     )
     
-    t2 = Tool(
-        name="ExamGenerator", 
-        description="根据用户偏好和指定的大纲内容出题。需要输入参数: {\"roadmap_json\": \"待出题的知识点JSON大纲字符串\"}。执行完毕后返回一套试题。",
-        func=generate_exam
-    )
-    return [t1, t2]
+    return [t1]

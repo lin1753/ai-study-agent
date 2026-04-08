@@ -3,7 +3,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import MainThread from '../components/MainThread';
 import ChatInterface from '../components/ChatInterface';
-import { X, MessageSquare, ChevronRight, History, ArrowLeft } from 'lucide-react';
+import { X, MessageSquare, ChevronRight, History, ArrowLeft, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
 import * as API from '../api';
 
@@ -13,6 +13,10 @@ export default function StudySpace() {
     const [showRightPanel, setShowRightPanel] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
     const [branchHistory, setBranchHistory] = useState([]);
+
+    // Loading states phase 6.5
+    const [isCreatingBranch, setIsCreatingBranch] = useState(false);
+    const [branchLoadingText, setBranchLoadingText] = useState("");
 
     // Resizable panel state
     const [rightPanelWidth, setRightPanelWidth] = useState(400);
@@ -53,14 +57,40 @@ export default function StudySpace() {
             return;
         }
 
+        // Optimistic update Phase 6.5
+        setShowRightPanel(true);
+        setShowHistory(false);
+        setIsCreatingBranch(true);
+        setActiveBranchId(null);
+        
+        const loadingSteps = [
+            "正在初始化专属私教空间...",
+            "正在检索关联上下文...",
+            "正在聚合原子知识节点...",
+            "正在唤醒私教 Agent..."
+        ];
+        
+        let step = 0;
+        setBranchLoadingText(loadingSteps[0]);
+        const intervalTimer = setInterval(() => {
+            step++;
+            if (step < loadingSteps.length) {
+                setBranchLoadingText(loadingSteps[step]);
+            }
+        }, 1800);
+
         try {
             const res = await API.createBranch(payload);
+            clearInterval(intervalTimer);
             setActiveBranchId(res.data.thread_id);
-            setShowRightPanel(true);
-            setShowHistory(false); // Switch to chat view
         } catch (error) {
+            clearInterval(intervalTimer);
             console.error("Failed to create branch", error);
             alert(error.response?.data?.detail || "无法创建支线对话，请检查后端服务与本地 LLM 连接。");
+            setShowRightPanel(false);
+        } finally {
+            clearInterval(intervalTimer);
+            setIsCreatingBranch(false);
         }
     };
 
@@ -202,8 +232,16 @@ export default function StudySpace() {
                                 )}
                             </div>
                         </div>
+                    ) : isCreatingBranch ? (
+                        <div className="flex flex-col items-center justify-center h-full text-blue-500 p-8 text-center bg-gray-50/50 animate-pulse">
+                            <Loader2 size={36} className="mb-4 animate-spin text-blue-400" />
+                            <h3 className="text-base font-semibold text-gray-700 mb-2 tracking-wide">即将进入支线探索</h3>
+                            <p className="text-sm font-medium text-blue-500/80 transition-all duration-500">
+                                {branchLoadingText}
+                            </p>
+                        </div>
                     ) : activeBranchId ? (
-                        <ChatInterface threadId={activeBranchId} />
+                        <ChatInterface threadId={activeBranchId} spaceId={spaceId} />
                     ) : (
                         <div className="flex flex-col items-center justify-center h-full text-gray-400 p-8 text-center bg-gray-50/30">
                             <MessageSquare size={32} className="mb-2 opacity-20" />

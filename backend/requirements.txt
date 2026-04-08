@@ -4,6 +4,7 @@ sqlalchemy
 pydantic
 requests
 pymupdf
+rapidocr_onnxruntime
 python-multipart
 python-pptx
 pdfminer.six

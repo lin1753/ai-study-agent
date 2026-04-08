@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 import os
 import shutil
-import json
 import traceback
 import logging
 
@@ -11,7 +10,7 @@ from models.database import FileRecord
 from core.redis_client import task_queue
 from rq.job import Job
 from core.redis_client import redis_conn
-from services.upload_service import merge_roadmap_chunks, process_upload_task
+from services.upload_service import merge_roadmap_chunks, process_upload_task, process_supplementary_upload_task
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +21,12 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/{space_id}/upload")
 def upload_file(space_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """上传 PDF/PPT 并推送到 Redis 队列由 Worker 解析"""
     try:
         file_path = os.path.join(UPLOAD_DIR, f"{space_id}_{file.filename}")
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        ftype = 'pdf' if file.filename.lower().endswith('.pdf') else 'ppt'
+        ftype = "pdf" if file.filename.lower().endswith(".pdf") else "ppt"
         
         record = FileRecord(
             space_id=space_id,
@@ -41,20 +39,12 @@ def upload_file(space_id: str, file: UploadFile = File(...), db: Session = Depen
         db.commit()
         db.refresh(record)
 
-        # 把耗时的处理推入 Redis 队列
         job = task_queue.enqueue(process_upload_task, space_id, record.id, file_path, ftype)
 
-        return {
-            "message": "文件已上传，已加入后台处理队列",
-            "job_id": job.id, 
-            "file_record_id": record.id
-        }
-        
-    except HTTPException as he:
-        raise he
+        return {"message": "OK", "job_id": job.id, "file_record_id": record.id}
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/files/status/{job_id}")
 def get_task_status(job_id: str):
@@ -65,6 +55,43 @@ def get_task_status(job_id: str):
         elif job.is_failed:
             return {"status": "failed", "error": str(job.exc_info)}
         else:
-            return {"status": "processing"}
+            job.refresh()
+            msg = job.meta.get("progress_message", "processing...")
+            return {"status": "processing", "message": msg}
     except Exception as e:
         return {"status": "not_found", "detail": str(e)}
+
+@router.post("/{space_id}/upload_supplementary")
+def upload_supplementary_file(space_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        file_path = os.path.join(UPLOAD_DIR, f"{space_id}_{file.filename}")
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        fname_lower = file.filename.lower()
+        if fname_lower.endswith(".pdf"):
+            ftype = "pdf"
+        elif fname_lower.endswith(".ppt") or fname_lower.endswith(".pptx"):
+            ftype = "ppt"
+        elif fname_lower.endswith(".jpg") or fname_lower.endswith(".jpeg") or fname_lower.endswith(".png") or fname_lower.endswith(".webp"):
+            ftype = "jpg"
+        else:
+            ftype = "txt"
+            
+        record = FileRecord(
+            space_id=space_id,
+            filename=file.filename,
+            filepath=file_path,
+            file_type=ftype,
+            processed=False
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+
+        job = task_queue.enqueue(process_supplementary_upload_task, space_id, record.id, file_path, ftype)
+
+        return {"message": "OK", "job_id": job.id, "file_record_id": record.id}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

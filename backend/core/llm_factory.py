@@ -140,7 +140,7 @@ class OllamaService(BaseLLMService):
 {{
     "chapter_title": "当前页的章节标题（可沿用上一页的名称，如果发现明显是新章节则命名新的）",
     "points": [
-        {{"name": "概念名称", "content": "详细的一句话解释", "importance": 3}}
+        {{"name": "概念名称", "content": "详细的一句话解释", "importance": 3, "original_questions": ["在此概念附近发现的原题/习题1", "原想2"]}}
     ],
     "examples": [
         {{"question": "必须100%来自原文的例题题干（如果没有这页则返回空）", "solution": "严格使用原文解答"}}
@@ -359,7 +359,7 @@ class OllamaService(BaseLLMService):
             "    \"title\": \"严格提取文档中的章节标题（若无标题，请根据逻辑自行总结，如：计算机网络概论）\",\n"
             "    \"summary\": \"本章核心考点与重难点总结\",\n"
             "    \"points\": [\n"
-            "      { \"id\": \"p1\", \"name\": \"具体概念/公式名\", \"content\": \"详细定义、公式内容及物理/几何意义\", \"importance\": 5, \"type\": \"concept\" }\n"
+            "      { \"id\": \"p1\", \"name\": \"具体概念/公式名\", \"content\": \"详细定义、公式内容及物理/几何意义\", \"importance\": 5, \"type\": \"concept\", \"original_questions\": [\"散落于此知识点附近的原题或课后习题题干1\", \"原题2\"] }\n"
             "    ],\n"
             "    \"examples\": [\n"
             "      { \"question\": \"文档原文中的题目描述\", \"solution\": \"原文中提供或能直接推导出的详细解答步骤\" }\n"
@@ -407,27 +407,9 @@ class OllamaService(BaseLLMService):
                 res_json_str = res_text
             
             # ATTEMPT 1: Direct Parse
-            # Regex to match backslash followed by ANY character (including space, quote, etc)
-            # We use dotall=True if we want to match newlines, but usually escapes differ there.
-            # Json strings shouldn't have real newlines anyway.
-            
-            def escape_fix(m):
-                seq = m.group(0) # \x
-                # If it's a known valid escape, keep it.
-                # Note: \\ is valid. \" is valid.
-                if seq in ['\\"', '\\\\', '\\/', '\\b', '\\f', '\\n', '\\r', '\\t']:
-                    return seq
-                if seq.startswith('\\u'): 
-                    return seq
-                # Otherwise, double it (e.g. \space -> \\space, \a -> \\a)
-                return '\\\\' + seq[1] 
-            
-            # Match backslash and the following character (including whitespace)
-            fixed_str = re.sub(r'\\(.)', escape_fix, res_json_str)
-            
             try:
-                roadmap = json.loads(fixed_str)
-                logger.info("JSON repaired successfully.")
+                roadmap = json.loads(res_json_str)
+                logger.info("JSON parsed successfully.")
             except Exception as e2:
                 logger.error(f"JSON repair failed: {e2}")
                 # FALLBACK: Create a single chapter with the raw text
@@ -695,7 +677,7 @@ class CloudAPIService(OllamaService):
             "    \"title\": \"严格提取文档中的章节标题（若无标题，请根据逻辑自行总结，如：计算机网络概论）\",\n"
             "    \"summary\": \"本章核心考点与重难点总结\",\n"
             "    \"points\": [\n"
-            "      { \"id\": \"p1\", \"name\": \"具体概念/公式名\", \"content\": \"详细定义、公式内容及物理/几何意义\", \"importance\": 5, \"type\": \"concept\" }\n"
+            "      { \"id\": \"p1\", \"name\": \"具体概念/公式名\", \"content\": \"详细定义、公式内容及物理/几何意义\", \"importance\": 5, \"type\": \"concept\", \"original_questions\": [\"散落于此知识点附近的原题或课后习题\"], \"examples\": [\"详细的解答步骤\"] }\n"
             "    ],\n"
             "    \"examples\": [\n"
             "      { \"question\": \"文档原文中的题目描述\", \"solution\": \"原文中提供或能直接推导出的详细解答步骤\" }\n"

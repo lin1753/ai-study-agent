@@ -19,98 +19,120 @@ class StudyAgent:
         self.max_steps = max_steps
         self.tools: Dict[str, Tool] = {}
         
-        # System Prompt for the ReAct loop
         self.system_prompt = """你是一个智能学习助理(Study Agent)。
-你在帮助用户解析学习资料或回答学习问题时，必须思考并可能调用工具。
-可用的工具：
+你的任务是帮助用户学习、检索资料或解答问题。
+
+### 工作流程 (ReAct):
+1. **思考 (Thought)**: 仔细思考用户的请求，考虑是否需要调用工具。思考内容可以直接输出，不需要特殊标签。
+2. **行动 (Action)**: 如果你要获取外部信息或执行操作，请务必严格使用以下格式调用工具：
+<action name="工具名">{"参数名": "参数值"}</action>
+3. **完成 (Final Answer)**: 当你获得足够且准确的信息准备好回答用户时，无论是否调用过工具，请始终将你给用户的最终答复包裹在下面标签中：
+<final_answer>你的最终详细回答内容，可以使用Markdown进行排版。</final_answer>
+
+### 可用工具:
 {tool_descriptions}
 
-使用以下格式进行思考和行动：
-Thought: 思考我接下来应该做什么。
-Action: 要调用的工具名称（只能是[{tool_names}]之一）。
-Action Input: 传递给工具的 JSON 格式参数，例如 {{"text": "需要处理的内容"}}。
-
-当工具返回观察结果（Observation）后，继续思考。如果你已经获得了足够的信息来回答用户请求（或者完成任务），请以以下格式结束：
-Thought: 我已经完成了任务。
-Final Answer: 最终的结果或总结。
+### 注意事项:
+- 单次回复中你可以包含多个思考步骤。
+- 只有在需要额外信息时才触发 <action> 标签调用工具！
+- 不要瞎编和猜测数据。
+- 调用工具后，系统会补充 [工具返回: ...] 给到你，收到后请根据返回内容继续思考。
+- 如果不使用任何工具也能回答（比如只是聊天或者打招呼），请直接思考片刻后输出 <final_answer>回复内容</final_answer>。
 """
 
     def register_tool(self, tool: Tool):
         self.tools[tool.name] = tool
 
-    def run(self, task_instruction: str, context: str = "") -> str:
+    def _format_sse(self, data_type: str, content: str) -> str:
+        """格式化为 SSE 协议字符串"""
+        payload = json.dumps({"type": data_type, "content": content}, ensure_ascii=False)
+        return f"data: {payload}\n\n"
+
+    def run_stream(self, task_instruction: str, history: List[Dict] = None):
+        """
+        Runs the agent stream and yields SSE data containing 'thought' and 'message' chunks.
+        """
         tool_descriptions = "\n".join([f"- {t.name}: {t.description}" for t in self.tools.values()])
-        tool_names = ", ".join(self.tools.keys())
+        system_msg = self.system_prompt.format(tool_descriptions=tool_descriptions)
         
-        system_msg = self.system_prompt.format(
-            tool_descriptions=tool_descriptions,
-            tool_names=tool_names
-        )
+        messages = [{"role": "system", "content": system_msg}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": task_instruction})
         
-        history = [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": f"Context/State:\n{context}\n\nTask:\n{task_instruction}"}
-        ]
+        logger.info("[Agent] Stream loop started")
+        yield self._format_sse("thought", "[Agent] 正在思考与检索...\n")
         
         for step in range(self.max_steps):
             logger.debug(f"[Agent] Step {step+1}/{self.max_steps}")
             
-            # Simple interaction assuming llm_service has a generic chat/completion method
-            # We construct a local prompt for this simplified agent
-            prompt_text = ""
-            for msg in history:
-                prompt_text += f"\n{msg['role'].upper()}: {msg['content']}"
-            prompt_text += "\nASSISTANT: "
+            full_chunk_acc = ""
+            current_action_name = None
+            current_action_args = None
+            in_final_answer = False
             
-            response = self._call_llm_raw(prompt_text)
-            logger.debug(f"[Agent] RAW Output: {response}")
-            
-            # Parse the response for Action and Final Answer
-            if "Final Answer:" in response:
-                return response.split("Final Answer:", 1)[1].strip()
-                
-            if "Action:" in response and "Action Input:" in response:
-                action_part = response.split("Action:", 1)[1]
-                action_name = action_part.split("Action Input:", 1)[0].strip()
-                
-                action_input_part = response.split("Action Input:", 1)[1].strip()
-                # Enhanced JSON extraction:
-                import re
-                json_match = re.search(r"(\{.*\})", action_input_part, re.DOTALL)
-                if json_match:
-                    input_json_str = json_match.group(1).strip()
-                else:
-                    input_json_str = action_input_part.split("\n")[0].strip()
-                
-                try:
-                    kwargs = json.loads(input_json_str)
-                except json.JSONDecodeError:
-                    # fallback
-                    kwargs = {"text": input_json_str}
-                    
-                tool_result = "Tool not found."
-                if action_name in self.tools:
-                    try:
-                        tool_result = str(self.tools[action_name].run(**kwargs))
-                    except Exception as e:
-                        tool_result = f"Error executing tool: {str(e)}"
-                
-                observation = f"Observation: {tool_result}"
-                history.append({"role": "assistant", "content": response})
-                history.append({"role": "user", "content": observation})
-                logger.debug(f"[Agent] Tool {action_name} executed -> {tool_result[:100]}")
-            else:
-                # If the LLM doesn't follow the format, force break or return
-                logger.warning("[Agent] LLM did not return an Action or Final Answer format.")
-                return response
-                
-        return "Max steps reached without concluding."
+            for chunk in self.llm.chat_stream(messages):
+                full_chunk_acc += chunk
 
-    def _call_llm_raw(self, prompt: str) -> str:
-        try:
-            result = self.llm.generate_raw(prompt, temperature=0.3)
-            if result.startswith("Error:"):
-                return f"Final Answer: {result}"
-            return result
-        except Exception as e:
-            return f"Final Answer: LLM completion failed: {e}"
+                if not in_final_answer and "<final_answer>" in full_chunk_acc:
+                    in_final_answer = True
+                    split_parts = full_chunk_acc.split("<final_answer>", 1)
+                    if len(split_parts) > 1 and len(split_parts[1]) > 0:
+                        content_to_yield = split_parts[1]
+                        yield self._format_sse("message", content_to_yield)
+                    continue
+
+                if in_final_answer:
+                    clean_chunk = chunk
+                    if "</final_answer>" in full_chunk_acc:
+                        idx = clean_chunk.find("</final_answer>")
+                        if idx != -1:
+                            clean_chunk = clean_chunk[:idx]
+
+                    if clean_chunk:
+                        yield self._format_sse("message", clean_chunk)
+                    
+                    if "</final_answer>" in full_chunk_acc:
+                        break # Done yielding message for this turn
+                    
+                else:
+                    # we are in thought phase
+                    yield self._format_sse("thought", chunk)
+                    
+                    import re
+                    action_match = re.search(r'<action name="(.*?)">(.*?)</action>', full_chunk_acc, re.DOTALL)
+                    if action_match:
+                        current_action_name = action_match.group(1).strip()
+                        current_action_args = action_match.group(2).strip()
+                        break 
+            
+            if current_action_name:
+                yield self._format_sse("thought", f"\n[尝试调用工具: {current_action_name}]...")
+                logger.info(f"[Agent] Invoking tool {current_action_name}")
+                
+                result = "Tool not found."
+                if current_action_name in self.tools:
+                    try:
+                        args = json.loads(current_action_args)
+                        result = self.tools[current_action_name].run(**args)
+                    except json.JSONDecodeError:
+                        try:
+                            result = self.tools[current_action_name].run(query=current_action_args)
+                        except:
+                            result = "Error: Invalid JSON parameters for tool."
+                    except Exception as e:
+                        result = f"Error executing tool {current_action_name}: {str(e)}"
+                
+                yield self._format_sse("thought", f"\n[工具返回: {str(result)[:50]}...]\n")
+                
+                messages.append({"role": "assistant", "content": full_chunk_acc})
+                messages.append({"role": "user", "content": f"[工具返回: {result}]"})
+                continue
+            
+            if "<final_answer>" in full_chunk_acc:
+                break
+                
+            if step == self.max_steps - 1:
+                yield self._format_sse("thought", "\n[System: Max steps reached]\n")
+                
+        yield self._format_sse("done", "")

@@ -169,6 +169,24 @@ function PointCard({ point, mastery, onUpdateMastery, onOpenBranch }) {
                 <p className="text-sm text-gray-600 leading-relaxed font-medium bg-gray-50/50 p-2.5 rounded-lg border border-gray-50">
                     {point.content}
                 </p>
+                
+                {/* 关联原题区 (Phase 6) */}
+                {point.original_questions && point.original_questions.length > 0 && (
+                    <div className="mt-3 bg-blue-50/50 rounded-lg p-3 border border-blue-100">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 mb-2">
+                            <BookOpen size={13} />
+                            知识点原题/习题 ({point.original_questions.length})
+                        </div>
+                        <ul className="space-y-2">
+                            {point.original_questions.map((q, idx) => (
+                                <li key={idx} className="text-sm text-gray-700 bg-white p-2 rounded border border-gray-100 shadow-sm">
+                                    <span className="font-medium text-blue-500 mr-2">Q{idx + 1}.</span>
+                                    {q}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
             </div>
 
             {/* 进入支线 hover 按钮 */}
